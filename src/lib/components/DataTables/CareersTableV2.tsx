@@ -96,10 +96,18 @@ export default function CareersV2Table() {
         const orgDetails = await axios.post("/api/feth-org-details", {
           orgID: activeOrg._id,
         });
-        setAvailableJobSlots((orgDetails.data?.plan?.jobLimit || 3) + (orgDetails.data?.extraJobSlots || 0));
+        // Minimal change: align UI fallback with API's fallback when no plan is attached
+        const baseLimit = (typeof orgDetails.data?.plan?.jobLimit === "number")
+          ? orgDetails.data.plan.jobLimit
+          : 1; // fallback base
+        setAvailableJobSlots(baseLimit + (orgDetails.data?.extraJobSlots || 0));
       } catch (error) {
         console.error("Error fetching org details:", error);
-        errorToast("Error fetching organization details", 1500);
+        // Minimal change: don't block recruiter from adding first job if org details fail to load
+        // Use a safe local fallback (base 1 + extraJobSlots from activeOrg if present)
+        const fallback = 1 + (activeOrg?.extraJobSlots || 0);
+        setAvailableJobSlots(fallback);
+        errorToast("Using default job slots (org details unavailable)", 1500);
       }
     }
       if (activeOrg) {
@@ -161,10 +169,11 @@ export default function CareersV2Table() {
     data-tooltip-html={`You have reached the maximum number of jobs for your plan. Please upgrade your plan to add more jobs.`}
     >
     <button className="button-primary-v2"
-    disabled={totalActiveCareers >= availableJobSlots}
+    // Minimal change: if slots are not yet known (0), don't block adding a career
+    disabled={availableJobSlots > 0 ? (totalActiveCareers >= availableJobSlots) : false}
     style={{ 
-      opacity: totalActiveCareers >= availableJobSlots ? 0.5 : 1, 
-      cursor: totalActiveCareers >= availableJobSlots ? "not-allowed" : "pointer"
+      opacity: (availableJobSlots > 0 && totalActiveCareers >= availableJobSlots) ? 0.5 : 1, 
+      cursor: (availableJobSlots > 0 && totalActiveCareers >= availableJobSlots) ? "not-allowed" : "pointer"
     }}
     >
       <i className="la la-plus" /> Add new career

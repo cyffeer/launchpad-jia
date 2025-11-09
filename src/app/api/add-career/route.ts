@@ -63,9 +63,9 @@ export async function POST(request: Request) {
             as: "plan"
         }
       },
-      {
-        $unwind: "$plan"
-      },
+      // Minimal change: allow orgs without a plan to pass through by preserving empty plan arrays
+      // This avoids blocking job creation during setup when planId is null/unset.
+      { $unwind: { path: "$plan", preserveNullAndEmptyArrays: true } },
     ]).toArray();
 
     if (!orgDetails || orgDetails.length === 0) {
@@ -74,7 +74,14 @@ export async function POST(request: Request) {
 
     const totalActiveCareers = await db.collection("careers").countDocuments({ orgID, status: "active" });
 
-    if (totalActiveCareers >= (orgDetails[0].plan.jobLimit + (orgDetails[0].extraJobSlots || 0))) {
+    // Minimal change: add a safe fallback plan when no plan is attached
+    // Rationale: In early setups, org.planId can be null. Fallback allows limited job creation without forcing a plan record.
+    const plan = orgDetails[0].plan || { jobLimit: 1 }; // default to 1 base job if no plan
+    const planJobLimit = typeof plan?.jobLimit === "number" && plan.jobLimit >= 0 ? plan.jobLimit : 1;
+    const extraSlots = orgDetails[0]?.extraJobSlots || 0;
+    const maxJobs = planJobLimit + extraSlots;
+
+    if (totalActiveCareers >= maxJobs) {
       return NextResponse.json({ error: "You have reached the maximum number of jobs for your plan" }, { status: 400 });
     }
 

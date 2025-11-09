@@ -22,7 +22,7 @@ export async function POST(req: Request) {
       query = { _id: orgID };
     }
 
-    const orgDoc = await db.collection("organizations").aggregate([
+  const orgDoc = await db.collection("organizations").aggregate([
       {
         $match: query
       },
@@ -45,9 +45,8 @@ export async function POST(req: Request) {
             as: "plan"
         }
     },
-    {
-      $unwind: "$plan"
-    },
+  // Minimal change: preserve empty plan arrays to allow orgs without planId
+  { $unwind: { path: "$plan", preserveNullAndEmptyArrays: true } },
     ]).toArray();
 
     if (!orgDoc || orgDoc.length === 0) {
@@ -57,7 +56,12 @@ export async function POST(req: Request) {
       );
     }
 
-    return Response.json(orgDoc[0]);
+    // Provide a lightweight fallback when plan is missing so UI can still compute job slots
+    const doc = orgDoc[0];
+    if (!doc.plan) {
+      doc.plan = { jobLimit: 1 }; // fallback base limit
+    }
+    return Response.json(doc);
   } catch (error) {
     console.error("Error in feth-org-details endpoint:", error);
     return Response.json({ error: "Internal server error" }, { status: 500 });
