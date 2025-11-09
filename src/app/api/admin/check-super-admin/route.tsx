@@ -6,9 +6,14 @@ export async function POST(req: Request) {
 
   try {
     const { db } = await connectMongoDB();
-    const user = await db.collection("admins").findOne({ email });
+    // Minimal change: allow users marked as admin in applicants to access admin portal
+    // This keeps backward compatibility for setups without an `admins` collection.
+    const admin = await db.collection("admins").findOne({ email });
+    const applicantAdmin = await db
+      .collection("applicants")
+      .findOne({ email, role: { $in: ["admin", "super_admin", "superadmin"] } });
 
-    return NextResponse.json({ isSuperAdmin: !!user });
+    return NextResponse.json({ isSuperAdmin: !!admin || !!applicantAdmin });
   } catch (error) {
     console.error("Error checking super admin:", error);
     return NextResponse.json({ isSuperAdmin: false }, { status: 500 });

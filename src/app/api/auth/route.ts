@@ -28,14 +28,19 @@ export async function POST(request: Request) {
         }
       );
 
-      return NextResponse.json(admin);
+      // Minimal change: ensure clients can reliably detect admin role
+      // Without this, the frontend couldn't know the user is an admin unless on a specific host
+      return NextResponse.json({ ...admin, role: "admin" });
     } else {
       const applicant = await db
         .collection("applicants")
         .findOne({ email: email });
 
       if (applicant) {
-        return NextResponse.json(applicant);
+        // Ensure role consistency for older applicant records that may not have a role field
+        return NextResponse.json(
+          applicant.role ? applicant : { ...applicant, role: "applicant" }
+        );
       }
 
       if (!applicant) {

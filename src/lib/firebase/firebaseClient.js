@@ -60,6 +60,21 @@ export async function signInWithGoogle(type) {
       image: profile.picture,
     })
     .then(async (res) => {
+      // If backend identifies user as admin, set role early and route accordingly
+      // Minimal change: this avoids defaulting to applicant when 'admins' collection has the email
+      if (res?.data?.role === "admin") {
+        localStorage.role = "admin";
+        // Persist the user payload for consistency with the rest of the app
+        localStorage.user = JSON.stringify({
+          name: profile.name,
+          email: profile.email,
+          image: profile.picture,
+          role: "admin",
+        });
+        window.location.href = "/admin-portal";
+        return false;
+      }
+
       if (
         res.data.error &&
         profile.email.split("@")[1] !== "whitecloak.com" &&
@@ -74,6 +89,29 @@ export async function signInWithGoogle(type) {
       successToast("Login successful");
 
       const host = window.location.host;
+
+      // Developer-only override for local testing without org membership
+      // Usage: append ?as=admin or ?as=recruiter to the URL on localhost
+      // Note: Both admin and recruiter flows use localStorage.role === 'admin' to unlock recruiter dashboards
+      if (window.location.origin.includes("localhost")) {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const as = params.get("as")?.toLowerCase();
+          if (as === "admin" || as === "recruiter") {
+            localStorage.role = "admin"; // recruiter flows expect 'admin' for access
+            localStorage.user = JSON.stringify({
+              name: profile.name,
+              email: profile.email,
+              image: profile.picture,
+              role: as,
+            });
+            window.location.href = "/recruiter-dashboard";
+            return false;
+          }
+        } catch (e) {
+          // no-op: query parsing failed, continue normal flow
+        }
+      }
 
       if (
         (host.includes("localhost") || host.includes("hirejia.ai")) &&
@@ -222,6 +260,14 @@ export function signInWithMicrosoft() {
           if (res.data.error) {
             errorToast(res.data.error);
             toast.dismiss("loading-toast");
+          }
+
+          // Minimal change: honor admin role from backend for Microsoft SSO as well
+          if (res?.data?.role === "admin") {
+            localStorage.user = JSON.stringify(res.data);
+            localStorage.role = "admin";
+            window.location.href = "/admin-portal";
+            return;
           }
 
           if (res.data.name) {
