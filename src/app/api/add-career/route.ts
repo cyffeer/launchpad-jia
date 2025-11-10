@@ -24,6 +24,11 @@ export async function POST(request: Request) {
       country,
       province,
       employmentType,
+      teamMembers,
+      cvSecretPrompt,
+      preScreeningQuestions,
+      aiSecretPrompt,
+      pipelineStages,
     } = await request.json();
     // Validate required fields
     if (!jobTitle || !description || !questions || !location || !workSetup) {
@@ -108,6 +113,11 @@ export async function POST(request: Request) {
       country,
       province,
       employmentType,
+      teamMembers: Array.isArray(teamMembers) ? teamMembers : [], // optional new field for segmented Team Access step
+      cvSecretPrompt: cvSecretPrompt || "",
+      preScreeningQuestions: Array.isArray(preScreeningQuestions) ? preScreeningQuestions : [],
+      aiSecretPrompt: aiSecretPrompt || "",
+      pipelineStages: Array.isArray(pipelineStages) ? pipelineStages : [],
     };
 
     await db.collection("careers").insertOne(career);
