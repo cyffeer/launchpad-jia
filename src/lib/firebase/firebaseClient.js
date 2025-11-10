@@ -113,39 +113,7 @@ export async function signInWithGoogle(type) {
         }
       }
 
-      if (
-        (host.includes("localhost") || host.includes("hirejia.ai")) &&
-        res.data.role == "applicant"
-      ) {
-        Swal.fire({
-          title: "No Account Found",
-          text: `There's no employer account associated with your login ${res.data.email}.`,
-          icon: "warning",
-          showCancelButton: true, // second button
-          confirmButtonText: "OK",
-          cancelButtonText: "I'm a job seeker",
-          customClass: {
-            title: styles.swalTitle,
-            icon: styles.swalIcon,
-            confirmButton: styles.swalConfirmButton,
-            cancelButton: styles.swalCancelButton,
-            htmlContainer: styles.swalDescription,
-            popup: styles.swalContainer,
-            actions: styles.swalAction,
-          },
-        }).then((result) => {
-          if (result.isConfirmed) {
-            Swal.close();
-          } else if (result.dismiss === Swal.DismissReason.cancel) {
-            window.location.href = host.includes("localhost")
-              ? "/job-portal"
-              : "https://www.hellojia.ai";
-          }
-        });
-
-        localStorage.removeItem("user");
-        return false;
-      }
+      // Note: Do not short-circuit applicants here; we'll first check for org membership
 
       // handle direct interview link redirects
       if (window.location.search.includes("?directInterviewID")) {
@@ -160,6 +128,51 @@ export async function signInWithGoogle(type) {
         return false;
       }
 
+      // Do not perform portal/type redirect before we resolve org membership
+
+      if (host.startsWith("admin.hirejia.ai")) {
+        localStorage.role = "admin";
+        window.location.href = "/admin-portal";
+        return;
+      }
+
+      // Employer / admin org resolution only for non-applicants
+      let orgData = await axios.post("/api/get-org", { user: profile });
+      if (orgData.data.length > 0) {
+        // Org(s) found: recruiter/admin flow
+        localStorage.role = "admin"; // internal designation used for recruiter dashboards
+        const activeOrg = localStorage.activeOrg;
+        localStorage.activeOrg = activeOrg ? activeOrg : JSON.stringify(orgData.data[0]);
+        localStorage.orgList = JSON.stringify(orgData.data);
+        const parsedActiveOrg = JSON.parse(localStorage.activeOrg);
+        // Persist user role for downstream checks
+        try {
+          const storedUser = JSON.parse(localStorage.user || "{}");
+          localStorage.user = JSON.stringify({ ...storedUser, role: "admin" });
+        } catch (_) {}
+        if (parsedActiveOrg.role == "hiring_manager") {
+          window.location.href = `/recruiter-dashboard/careers?orgID=${parsedActiveOrg._id}`;
+        } else {
+          window.location.href = `/recruiter-dashboard?orgID=${parsedActiveOrg._id}`;
+        }
+        return;
+      }
+
+      // No orgs: treat as applicant after all overrides
+      localStorage.role = "applicant";
+      try {
+        const storedUser = JSON.parse(localStorage.user || "{}");
+        localStorage.user = JSON.stringify({ ...storedUser, role: "applicant" });
+      } catch (_) {}
+
+      // Maintain redirect flow if present
+      if (window.location.search.includes("?redirect=")) {
+        const redirect = window.location.search.split("?redirect=")[1];
+        if (redirect) {
+          window.location.href = redirect;
+          return;
+        }
+      }
       if (type === "whitecloak-careers") {
         if (sessionStorage.redirectionPath) {
           const redirectionPath = sessionStorage.getItem("redirectionPath");
@@ -168,9 +181,8 @@ export async function signInWithGoogle(type) {
         } else {
           window.location.href = "/whitecloak/applicant";
         }
-        return false;
+        return;
       }
-
       if (type === "job-portal") {
         if (sessionStorage.redirectionPath) {
           const redirectionPath = sessionStorage.getItem("redirectionPath");
@@ -179,55 +191,12 @@ export async function signInWithGoogle(type) {
         } else {
           window.location.href = "/dashboard";
         }
-        return false;
-      }
-
-      // maintain flow
-      if (window.location.search.includes("?redirect=")) {
-        let redirect = window.location.search.split("?redirect=")[1];
-
-        if (redirect) {
-          window.location.href = redirect;
-        }
-
-        return false;
-      }
-
-      if (host.startsWith("admin.hirejia.ai")) {
-        localStorage.role = "admin";
-        window.location.href = "/admin-portal";
         return;
       }
-
-      let orgData = await axios.post("/api/get-org", {
-        user: profile,
-      });
-
-      if (orgData.data.length == 0) {
-        localStorage.role = "applicant";
-        window.location.href = window.location.origin.includes("localhost")
-          ? "/job-portal"
-          : "https://www.hellojia.ai";
-        return;
-      }
-
-      if (orgData.data.length > 0) {
-        localStorage.role = "admin";
-        const activeOrg = localStorage.activeOrg;
-
-        localStorage.activeOrg = activeOrg
-          ? activeOrg
-          : JSON.stringify(orgData.data[0]);
-        localStorage.orgList = JSON.stringify(orgData.data);
-
-        const parsedActiveOrg = JSON.parse(localStorage.activeOrg);
-
-        if (parsedActiveOrg.role == "hiring_manager") {
-          window.location.href = `/recruiter-dashboard/careers?orgID=${parsedActiveOrg._id}`;
-        } else {
-          window.location.href = `/recruiter-dashboard?orgID=${parsedActiveOrg._id}`;
-        }
-      }
+      // Default applicant landing
+      window.location.href = window.location.origin.includes("localhost")
+        ? "/job-portal"
+        : "https://www.hellojia.ai";
     })
     .catch((error) => {
       console.error("Google login error", error);
