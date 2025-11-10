@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import connectMongoDB from "@/lib/mongoDB/mongoDB";
 import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export async function POST(request: Request) {
   const { interviewID, userEmail } = await request.json();
@@ -88,30 +89,93 @@ export async function POST(request: Request) {
       - DO NOT include \`\`\`json or \`\`\` around the response.
   `;
 
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-  const completion = await openai.responses.create({
-    model: "o4-mini",
-    reasoning: { effort: "high" },
-    input: [
-      {
-        role: "user",
-        content: screeningPrompt,
-      },
-    ],
-  });
+  async function runWithGemini(prompt: string) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) throw new Error("Missing GEMINI_API_KEY");
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const candidateModels = [
+      process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+    ];
+    const generationConfig = {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: {
+          result: { type: "string" },
+          reason: { type: "string" },
+          confidence: { type: "number" },
+          jobFitScore: { type: "number" },
+        },
+        required: ["result", "reason", "confidence", "jobFitScore"],
+      } as any,
+      temperature: 0.2,
+    } as const;
+    let lastErr: any = null;
+    for (const modelName of candidateModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig,
+        });
+        const resp = await model.generateContent({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+        });
+        return JSON.parse(resp.response.text());
+      } catch (e: any) {
+        lastErr = e;
+        if (
+          typeof e?.message === "string" &&
+          (e.message.includes("404") ||
+            e.message.includes("not found") ||
+            e.message.includes("not supported"))
+        ) {
+          continue;
+        }
+        break;
+      }
+    }
+    throw lastErr || new Error("Gemini generation failed");
+  }
 
-  let result: any = completion.output_text;
+  let result: any = null;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  if (hasOpenAI) {
+    try {
+      const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+      });
+      const completion = await openai.responses.create({
+        model: "o4-mini",
+        reasoning: { effort: "high" },
+        input: [
+          {
+            role: "user",
+            content: screeningPrompt,
+          },
+        ],
+      });
 
-  try {
-    result = result.replace("```json", "").replace("```", "");
-    result = JSON.parse(result);
-  } catch (error) {
-    console.log(error);
-    return NextResponse.json({
-      message: "[Error] Invalid JSON",
-    });
+      let out: any = completion.output_text;
+      try {
+        out = out.replace("```json", "").replace("```", "");
+        result = JSON.parse(out);
+      } catch (parseErr) {
+        result = await runWithGemini(screeningPrompt);
+      }
+    } catch (err) {
+      // On OpenAI API error (e.g., 429), fallback to Gemini
+      result = await runWithGemini(screeningPrompt);
+    }
+  } else {
+    // No OpenAI configured, go straight to Gemini
+    result = await runWithGemini(screeningPrompt);
   }
 
   let screeningData: any = {

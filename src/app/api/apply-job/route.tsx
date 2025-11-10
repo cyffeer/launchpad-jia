@@ -19,8 +19,11 @@ export async function POST(request: Request) {
 
     const { db } = await connectMongoDB();
 
+    const hasPreScreening = Array.isArray(jobApplicationData?.preScreeningQuestions) && jobApplicationData.preScreeningQuestions.length > 0;
     const interviewData = {
       ...jobApplicationData,
+      status: hasPreScreening ? "For Pre-Screening" : jobApplicationData.status || "For CV Upload",
+      preScreeningAnswers: Array.isArray(jobApplicationData?.preScreeningAnswers) ? jobApplicationData.preScreeningAnswers : [],
       reviewers: [],
     };
     // Remove origin from interviewData

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import connectMongoDB from "@/lib/mongoDB/mongoDB";
 import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 /** 
  * This API is used to only analyze the CV of a candidate without auto-promoting the candidate stage.
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
     cvScreeningPromptData?.cv_screening_prompt?.prompt;
 
   let parsedCV = "";
+  const preAnswers = Array.isArray(interviewData?.preScreeningAnswers) ? interviewData.preScreeningAnswers : [];
 
   cvData.digitalCV.forEach((section) => {
     parsedCV += `${section.name}\n${section.content}\n`;
@@ -66,6 +68,8 @@ export async function POST(request: Request) {
     Applicant CV:
       ${parsedCV}
 
+    ${preAnswers.length ? `Pre-screening Answers Provided by Applicant:\n${preAnswers.map((a:any, i:number)=> `${i+1}. ${a.question}: ${Array.isArray(a.answer) ? a.answer.join(', ') : a.answer}`).join('\n')}` : ''}
+
     Processing Steps:
       ${cvScreeningPromptText}
       - format your response as JSON:
@@ -85,30 +89,89 @@ export async function POST(request: Request) {
       - DO NOT include \`\`\`json or \`\`\` around the response.
   `;
 
-  const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-  });
-  const completion = await openai.responses.create({
-    model: "o4-mini",
-    reasoning: { effort: "high" },
-    input: [
-      {
-        role: "user",
-        content: screeningPrompt,
-      },
-    ],
-  });
+  // Gemini fallback helper
+  async function runWithGemini(prompt: string) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) throw new Error("Missing GEMINI_API_KEY");
 
-  let result: any = completion.output_text;
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const candidateModels = [
+      process.env.GEMINI_MODEL || "gemini-2.5-flash",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+    ];
+    const generationConfig = {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "object",
+        properties: {
+          result: { type: "string" },
+          reason: { type: "string" },
+          confidence: { type: "number" },
+          jobFitScore: { type: "number" },
+        },
+        required: ["result", "reason", "confidence", "jobFitScore"],
+      } as any,
+      temperature: 0.2,
+    } as const;
 
+    let lastErr: any = null;
+    for (const modelName of candidateModels) {
+      try {
+        const model = genAI.getGenerativeModel({
+          model: modelName,
+          generationConfig,
+        });
+        const resp = await model.generateContent({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+        });
+        return JSON.parse(resp.response.text());
+      } catch (e: any) {
+        lastErr = e;
+        if (
+          typeof e?.message === "string" &&
+          (e.message.includes("404") ||
+            e.message.includes("not found") ||
+            e.message.includes("not supported"))
+        ) {
+          continue;
+        }
+        break;
+      }
+    }
+    throw lastErr || new Error("Gemini generation failed");
+  }
+
+  let result: any = null;
   try {
-    result = result.replace("```json", "").replace("```", "");
-    result = JSON.parse(result);
-  } catch (error) {
-    console.log(error);
-    return NextResponse.json({
-      message: "[Error] Invalid JSON",
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
     });
+    const completion = await openai.responses.create({
+      model: "o4-mini",
+      reasoning: { effort: "high" },
+      input: [
+        {
+          role: "user",
+          content: screeningPrompt,
+        },
+      ],
+    });
+
+    let out: any = completion.output_text;
+    try {
+      out = out.replace("```json", "").replace("```", "");
+      result = JSON.parse(out);
+    } catch (parseErr) {
+      result = await runWithGemini(screeningPrompt);
+    }
+  } catch (err) {
+    result = await runWithGemini(screeningPrompt);
   }
 
   const update = {

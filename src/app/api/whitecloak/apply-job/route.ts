@@ -8,17 +8,19 @@ export async function POST(request: Request) {
   const { user, selectedCareer } = await request.json();
   const { db } = await connectMongoDB();
   const newDate = new Date();
+  const hasPreScreening = Array.isArray(selectedCareer?.preScreeningQuestions) && selectedCareer.preScreeningQuestions.length > 0;
   const interviewData = {
     ...selectedCareer,
     ...user,
     applicationStatus: "Ongoing", // important
     currentStep: "Applied", // important
-    status: "For CV Upload", // important
+    status: hasPreScreening ? "For Pre-Screening" : "For CV Upload", // gate CV upload if questions exist
     createdAt: newDate,
     updatedAt: newDate,
     interviewID: guid(),
     completedAt: null,
     reviewers: [],
+    preScreeningAnswers: [], // will be populated once applicant submits
   };
 
   delete interviewData._id;
