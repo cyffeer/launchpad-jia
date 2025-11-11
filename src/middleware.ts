@@ -11,10 +11,11 @@ export function middleware(request: NextRequest) {
     return NextResponse.rewrite(url);
   }
 
-  if (
-    host.includes("hirejia.ai") &&
-    (pathname.startsWith("/dashboard") || pathname.startsWith("/job-openings") || pathname.startsWith("/login"))
-  ) {
+  // NOTE: Previously, traffic to /dashboard, /job-openings, and /login on hirejia.ai was redirected to hellojia.ai.
+  // This caused applicants to be pushed out of the in-app job openings flow. We remove job-openings (and dashboard)
+  // from this cross-host redirect to keep applicants in-app. If a dedicated marketing host is needed later,
+  // guard redirects behind an env flag rather than hard-coding.
+  if (host.includes("hirejia.ai") && pathname.startsWith("/login")) {
     const newUrl = new URL(request.url);
     newUrl.hostname = "hellojia.ai";
     return NextResponse.redirect(newUrl);
@@ -33,12 +34,14 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(newUrl);
   }
 
-  // Redirect to hellojia.ai for applicant portal
-  if (!host.includes("hellojia") && !host.includes("localhost") && (pathname.includes("applicant") || pathname.includes("job-openings"))) {
-    const newUrl = new URL(request.url);
-    newUrl.hostname = `hellojia.ai`;
-    return NextResponse.redirect(newUrl);
-  }
+  // Redirect to hellojia.ai for applicant portal (DISABLED for in-app job openings and applicant pages)
+  // Keeping users in-app avoids unexpected cross-domain navigation when viewing job openings from the portal.
+  // If you need to force applicant pages to live on a separate host, re-enable this with an env toggle.
+  // if (!host.includes("hellojia") && !host.includes("localhost") && (pathname.includes("applicant") || pathname.includes("job-openings"))) {
+  //   const newUrl = new URL(request.url);
+  //   newUrl.hostname = `hellojia.ai`;
+  //   return NextResponse.redirect(newUrl);
+  // }
 
   return NextResponse.next();
 }
