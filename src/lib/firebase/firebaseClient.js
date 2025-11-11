@@ -194,9 +194,11 @@ export async function signInWithGoogle(type) {
         return;
       }
       // Default applicant landing
-      window.location.href = window.location.origin.includes("localhost")
-        ? "/job-portal"
-        : "https://www.hellojia.ai";
+      // CHANGE (UX fix): Previously we redirected non-local applicants to the external marketing site (hellojia.ai),
+      // which broke in-app navigation (e.g., attempting to view job openings after login). We now always keep
+      // applicants inside the application shell. If a marketing redirect is ever desired, gate it behind an
+      // environment variable (e.g., NEXT_PUBLIC_EXTERNAL_MARKETING_URL) rather than hardcoding.
+      window.location.href = "/job-portal"; // stay in-app for job exploration
     })
     .catch((error) => {
       console.error("Google login error", error);
