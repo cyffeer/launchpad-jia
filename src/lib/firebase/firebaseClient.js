@@ -71,6 +71,40 @@ export async function signInWithGoogle(type) {
           image: profile.picture,
           role: "admin",
         });
+
+        // Super Admin enhancement: seed recruiter context so admin can open recruiter dashboard.
+        // We fetch the list of active orgs (public GET in /api/get-org) and set orgList/activeOrg.
+        try {
+          const orgListResp = await axios.get("/api/get-org");
+          const orgs = Array.isArray(orgListResp?.data) ? orgListResp.data : [];
+          if (orgs.length > 0) {
+            localStorage.orgList = JSON.stringify(orgs);
+            // Preserve existing activeOrg if set; otherwise, pick the first
+            const activeOrg = localStorage.activeOrg;
+            if (!activeOrg) {
+              localStorage.activeOrg = JSON.stringify(orgs[0]);
+            }
+          }
+        } catch (e) {
+          // Non-fatal: admin portal still works; recruiter dashboard may ask to pick org
+          console.warn("Failed to fetch orgs for super admin context:", e);
+        }
+
+        // If caller intends recruiter view (?as=recruiter or ?go=recruiter) route there; else admin portal
+        const qs = new URLSearchParams(window.location.search);
+        const go = (qs.get("as") || qs.get("go") || "").toLowerCase();
+        if (go === "recruiter") {
+          try {
+            const chosen = JSON.parse(localStorage.activeOrg || "null");
+            if (chosen?._id) {
+              window.location.href = `/recruiter-dashboard?orgID=${chosen._id}`;
+              return false;
+            }
+          } catch (_) {}
+          window.location.href = "/recruiter-dashboard";
+          return false;
+        }
+
         window.location.href = "/admin-portal";
         return false;
       }
@@ -149,6 +183,16 @@ export async function signInWithGoogle(type) {
         try {
           const storedUser = JSON.parse(localStorage.user || "{}");
           localStorage.user = JSON.stringify({ ...storedUser, role: "admin" });
+        } catch (_) {}
+
+        // Hiring manager access to admin portal: honor ?as=admin or ?go=admin
+        try {
+          const qs = new URLSearchParams(window.location.search);
+          const go = (qs.get("as") || qs.get("go") || "").toLowerCase();
+          if (go === "admin") {
+            window.location.href = "/admin-portal";
+            return;
+          }
         } catch (_) {}
         if (parsedActiveOrg.role == "hiring_manager") {
           window.location.href = `/recruiter-dashboard/careers?orgID=${parsedActiveOrg._id}`;
